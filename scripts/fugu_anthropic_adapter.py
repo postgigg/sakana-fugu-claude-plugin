@@ -151,11 +151,99 @@ def _tools_to_openai(payload):
     return tools
 
 
-def _call_sakana(payload):
+def _openai_tool_requirements(openai_body):
+    requirements = {}
+    for tool in openai_body.get("tools", []) or []:
+        function = tool.get("function", {})
+        name = function.get("name")
+        required = function.get("parameters", {}).get("required", [])
+        if name and isinstance(required, list):
+            requirements[name] = set(required)
+    return requirements
+
+
+def _invalid_openai_tool_calls(openai_body, openai_response):
+    requirements = _openai_tool_requirements(openai_body)
+    invalid = []
+    choice = (openai_response.get("choices") or [{}])[0]
+    message = choice.get("message", {})
+    for call in message.get("tool_calls", []) or []:
+        function = call.get("function", {})
+        name = function.get("name")
+        required = requirements.get(name, set())
+        if not required:
+            continue
+        raw_args = function.get("arguments") or "{}"
+        try:
+            args = json.loads(raw_args)
+        except json.JSONDecodeError:
+            invalid.append({"name": name, "reason": "arguments are not valid JSON"})
+            continue
+        missing = [field for field in sorted(required) if field not in args or args.get(field) in (None, "")]
+        if missing:
+            invalid.append({"name": name, "reason": f"missing required fields: {', '.join(missing)}"})
+    return invalid
+
+
+def _repair_tool_call(openai_body, invalid):
+    repair_body = dict(openai_body)
+    repair_messages = list(openai_body.get("messages", []))
+    repair_messages.append({
+        "role": "system",
+        "content": (
+            "Your previous tool call was invalid. Reissue exactly one valid tool call. "
+            "Do not answer in prose. Invalid tool details: "
+            + json.dumps(invalid)
+        ),
+    })
+    repair_body["messages"] = repair_messages
+    return _post_sakana(repair_body)
+
+
+def _tool_error_response(model, invalid):
+    return {
+        "id": f"msg_{int(time.time())}",
+        "object": "chat.completion",
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": (
+                    "I could not produce a valid tool call. "
+                    "The adapter blocked the malformed call to avoid a retry loop. "
+                    f"Details: {json.dumps(invalid)}"
+                ),
+            },
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
+def _post_sakana(body):
     api_key = os.environ.get("SAKANA_API_KEY")
     if not api_key:
         raise RuntimeError("SAKANA_API_KEY is not set")
 
+    req = urllib.request.Request(
+        f"{API_BASE}/chat/completions",
+        data=json.dumps(body).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=600) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(detail) from exc
+
+
+def _call_sakana(payload):
     model = payload.get("model", "fugu")
     body = {
         "model": model,
@@ -176,21 +264,15 @@ def _call_sakana(payload):
     if tools:
         body["tools"] = tools
 
-    req = urllib.request.Request(
-        f"{API_BASE}/chat/completions",
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=600) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(detail) from exc
+    response = _post_sakana(body)
+    invalid = _invalid_openai_tool_calls(body, response)
+    if invalid:
+        repaired = _repair_tool_call(body, invalid)
+        repaired_invalid = _invalid_openai_tool_calls(body, repaired)
+        if not repaired_invalid:
+            return repaired
+        return _tool_error_response(model, repaired_invalid)
+    return response
 
 
 def _openai_to_anthropic(openai_payload, model):
