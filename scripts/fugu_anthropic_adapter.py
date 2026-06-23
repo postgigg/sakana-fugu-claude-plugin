@@ -47,8 +47,34 @@ def _text_from_content(content):
     return str(content)
 
 
+def _required_tool_fields(payload):
+    required = {}
+    for tool in payload.get("tools", []) or []:
+        name = tool.get("name")
+        fields = tool.get("input_schema", {}).get("required", [])
+        if name and isinstance(fields, list):
+            required[name] = set(fields)
+    return required
+
+
+def _missing_required_tool_input(tool_name, tool_input, required_by_tool):
+    required = required_by_tool.get(tool_name, set())
+    if not required:
+        return False
+    if not isinstance(tool_input, dict):
+        return True
+    return any(field not in tool_input or tool_input.get(field) in (None, "") for field in required)
+
+
+def _is_missing_required_tool_error(content):
+    text = _text_from_content(content)
+    return "InputValidationError" in text and "required parameter" in text and "is missing" in text
+
+
 def _anthropic_to_openai_messages(payload):
     messages = []
+    required_by_tool = _required_tool_fields(payload)
+    skipped_tool_use_ids = set()
     system = payload.get("system")
     if system:
         messages.append({"role": "system", "content": _text_from_content(system)})
@@ -68,26 +94,38 @@ def _anthropic_to_openai_messages(payload):
                     else:
                         user_text.append(item.get("text", ""))
                 elif item.get("type") == "tool_use":
+                    tool_id = item.get("id")
+                    tool_name = item.get("name")
+                    tool_input = item.get("input", {})
+                    if _missing_required_tool_input(tool_name, tool_input, required_by_tool):
+                        if tool_id:
+                            skipped_tool_use_ids.add(tool_id)
+                        continue
                     tool_calls.append({
-                        "id": item.get("id"),
+                        "id": tool_id,
                         "type": "function",
                         "function": {
-                            "name": item.get("name"),
-                            "arguments": json.dumps(item.get("input", {})),
+                            "name": tool_name,
+                            "arguments": json.dumps(tool_input),
                         },
                     })
                 elif item.get("type") == "tool_result":
+                    tool_use_id = item.get("tool_use_id")
+                    if tool_use_id in skipped_tool_use_ids or _is_missing_required_tool_error(item.get("content", "")):
+                        continue
                     pending_tool_results.append({
                         "role": "tool",
-                        "tool_call_id": item.get("tool_use_id"),
+                        "tool_call_id": tool_use_id,
                         "content": _text_from_content(item.get("content", "")),
                     })
 
             if role == "assistant":
-                openai_msg = {"role": "assistant", "content": "\n".join(assistant_text) or None}
-                if tool_calls:
-                    openai_msg["tool_calls"] = tool_calls
-                messages.append(openai_msg)
+                assistant_content = "\n".join(assistant_text) or None
+                if assistant_content or tool_calls:
+                    openai_msg = {"role": "assistant", "content": assistant_content}
+                    if tool_calls:
+                        openai_msg["tool_calls"] = tool_calls
+                    messages.append(openai_msg)
             elif user_text:
                 messages.append({"role": "user", "content": "\n".join(user_text)})
 
