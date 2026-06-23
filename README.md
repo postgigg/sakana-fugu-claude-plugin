@@ -140,6 +140,12 @@ For Ultra with shorter responses:
 $env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -MaxTokens 2048
 ```
 
+For Ultra with lower token usage while searching code:
+
+```powershell
+$env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -Model fugu-ultra -Lean
+```
+
 ```powershell
 $env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -FullClaude
 ```

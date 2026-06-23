@@ -10,6 +10,8 @@ param(
 
   [switch]$Fast,
 
+  [switch]$Lean,
+
   [int]$Port = 4010,
 
   [switch]$CheckOnly,
@@ -30,6 +32,10 @@ if ($Fast) {
   $Model = "fugu"
   $Effort = "high"
   $MaxTokens = [Math]::Min($MaxTokens, 2048)
+}
+
+if ($Lean) {
+  $MaxTokens = [Math]::Min($MaxTokens, 1024)
 }
 
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
@@ -82,6 +88,12 @@ $env:FUGU_MAX_TOKENS = "$MaxTokens"
 $launchArgs = @("--model", $Model, "--effort", $Effort)
 if (-not $FullClaude) {
   $launchArgs = @("--bare") + $launchArgs
+}
+if ($Lean) {
+  $launchArgs += @(
+    "--append-system-prompt",
+    "Operate in lean token mode. Use targeted search before reading files. Prefer rg/git grep over broad recursive reads. Read only the smallest relevant snippets. Avoid broad audits unless explicitly requested. Keep responses concise and stop once the requested evidence is found. Ask before scanning many files or running high-output commands."
+  )
 }
 $launchArgs += $ClaudeArgs
 
