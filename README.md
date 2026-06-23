@@ -33,6 +33,8 @@ It includes:
 - `fugu-gateway` skill
 - PowerShell launcher for Windows
 - Local Python adapter for `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/models`
+- Tool-call validation and one-shot repair for malformed Fugu tool calls
+- Anthropic-compatible streaming events, including `input_json_delta` for tool arguments
 
 ## Quick Start
 
@@ -102,6 +104,14 @@ ANTHROPIC_MODEL=fugu
 ```
 
 The adapter accepts Anthropic Messages requests from Claude Code and forwards them to Sakana's OpenAI-compatible chat completions endpoint.
+
+For tool use, the adapter also acts as a guardrail:
+
+- Converts Claude Code tools into OpenAI-compatible function schemas
+- Removes malformed historical tool calls that are missing required fields
+- Validates new model tool calls before Claude Code receives them
+- Retries once when Fugu emits malformed tool arguments
+- Streams tool arguments with Anthropic `input_json_delta` events so Claude Code can execute them correctly
 
 ## Security
 
