@@ -140,6 +140,8 @@ For tool use, the adapter also acts as a guardrail:
 - Validates new model tool calls before Claude Code receives them
 - Retries once when Fugu emits malformed tool arguments
 - Streams tool arguments with Anthropic `input_json_delta` events so Claude Code can execute them correctly
+- Preserves the latest user intent in a compact adapter message
+- Scrubs stale retry chatter, malformed tool-call loops, and oversized old outputs from history
 
 ## Security
 

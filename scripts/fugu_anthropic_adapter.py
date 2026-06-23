@@ -10,6 +10,9 @@ from urllib.parse import urlparse
 
 API_BASE = "https://api.sakana.ai/v1"
 SERVER_NAME = "sakana-fugu-adapter"
+MAX_TEXT_CHARS = 6000
+MAX_TOOL_RESULT_CHARS = 4000
+MAX_HISTORY_MESSAGES = 24
 
 
 def _json_response(handler, status, payload):
@@ -47,6 +50,62 @@ def _text_from_content(content):
     return str(content)
 
 
+def _truncate_text(text, limit):
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n\n[truncated {len(text) - limit} chars]"
+
+
+def _latest_user_intent(payload):
+    for msg in reversed(payload.get("messages", []) or []):
+        if msg.get("role") == "user":
+            text = _text_from_content(msg.get("content", "")).strip()
+            if text:
+                return _truncate_text(text, 1200)
+    return ""
+
+
+def _is_noisy_retry_text(text):
+    lowered = text.lower()
+    noisy_phrases = [
+        "i keep hitting a tool error",
+        "i apologize for the repeated errors",
+        "let me carefully retry",
+        "the required parameter `command` is missing",
+        "the required parameter command is missing",
+        "inputvalidationerror",
+    ]
+    return any(phrase in lowered for phrase in noisy_phrases)
+
+
+def _count_missing_tool_errors(payload):
+    count = 0
+    for msg in payload.get("messages", []) or []:
+        text = _text_from_content(msg.get("content", ""))
+        if _is_missing_required_tool_error(text):
+            count += 1
+    return count
+
+
+def _intent_system_message(payload):
+    intent = _latest_user_intent(payload)
+    missing_errors = _count_missing_tool_errors(payload)
+    lines = [
+        "Adapter intent/memory guard:",
+        "Preserve the latest user intent. Ignore stale retry chatter and old malformed tool-call loops.",
+        "Use one valid tool call at a time. Required tool arguments must be present.",
+    ]
+    if intent:
+        lines.append("Latest user intent:")
+        lines.append(intent)
+    if missing_errors >= 2:
+        lines.append(
+            "Repeated missing-argument tool errors were scrubbed from history. "
+            "Do not imitate them. Re-plan and emit a valid tool call with required arguments."
+        )
+    return {"role": "system", "content": "\n".join(lines)}
+
+
 def _required_tool_fields(payload):
     required = {}
     for tool in payload.get("tools", []) or []:
@@ -77,22 +136,30 @@ def _anthropic_to_openai_messages(payload):
     skipped_tool_use_ids = set()
     system = payload.get("system")
     if system:
-        messages.append({"role": "system", "content": _text_from_content(system)})
+        messages.append({"role": "system", "content": _truncate_text(_text_from_content(system), MAX_TEXT_CHARS)})
+    messages.append(_intent_system_message(payload))
 
     pending_tool_results = []
-    for msg in payload.get("messages", []):
+    history = list(payload.get("messages", []) or [])[-MAX_HISTORY_MESSAGES:]
+    for msg in history:
         role = msg.get("role", "user")
         content = msg.get("content", "")
+        raw_text = _text_from_content(content)
+        if role == "assistant" and _is_noisy_retry_text(raw_text):
+            continue
         if isinstance(content, list):
             assistant_text = []
             tool_calls = []
             user_text = []
             for item in content:
                 if item.get("type") == "text":
+                    item_text = item.get("text", "")
+                    if _is_noisy_retry_text(item_text):
+                        continue
                     if role == "assistant":
-                        assistant_text.append(item.get("text", ""))
+                        assistant_text.append(_truncate_text(item_text, MAX_TEXT_CHARS))
                     else:
-                        user_text.append(item.get("text", ""))
+                        user_text.append(_truncate_text(item_text, MAX_TEXT_CHARS))
                 elif item.get("type") == "tool_use":
                     tool_id = item.get("id")
                     tool_name = item.get("name")
@@ -116,7 +183,7 @@ def _anthropic_to_openai_messages(payload):
                     pending_tool_results.append({
                         "role": "tool",
                         "tool_call_id": tool_use_id,
-                        "content": _text_from_content(item.get("content", "")),
+                        "content": _truncate_text(_text_from_content(item.get("content", "")), MAX_TOOL_RESULT_CHARS),
                     })
 
             if role == "assistant":
@@ -133,7 +200,9 @@ def _anthropic_to_openai_messages(payload):
                 messages.extend(pending_tool_results)
                 pending_tool_results = []
         else:
-            messages.append({"role": role, "content": _text_from_content(content)})
+            if _is_noisy_retry_text(raw_text):
+                continue
+            messages.append({"role": role, "content": _truncate_text(raw_text, MAX_TEXT_CHARS)})
     return messages
 
 
