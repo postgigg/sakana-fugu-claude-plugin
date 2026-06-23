@@ -345,9 +345,30 @@ def _stream_anthropic(handler, message):
     content = shell.pop("content", [])
     _sse(handler, "message_start", {"type": "message_start", "message": {**shell, "content": []}})
     for index, block in enumerate(content):
-        _sse(handler, "content_block_start", {"type": "content_block_start", "index": index, "content_block": block})
         if block.get("type") == "text":
+            _sse(handler, "content_block_start", {"type": "content_block_start", "index": index, "content_block": {"type": "text", "text": ""}})
             _sse(handler, "content_block_delta", {"type": "content_block_delta", "index": index, "delta": {"type": "text_delta", "text": block.get("text", "")}})
+        elif block.get("type") == "tool_use":
+            _sse(handler, "content_block_start", {
+                "type": "content_block_start",
+                "index": index,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": block.get("id"),
+                    "name": block.get("name"),
+                    "input": {},
+                },
+            })
+            _sse(handler, "content_block_delta", {
+                "type": "content_block_delta",
+                "index": index,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": json.dumps(block.get("input", {})),
+                },
+            })
+        else:
+            _sse(handler, "content_block_start", {"type": "content_block_start", "index": index, "content_block": block})
         _sse(handler, "content_block_stop", {"type": "content_block_stop", "index": index})
     _sse(handler, "message_delta", {"type": "message_delta", "delta": {"stop_reason": message.get("stop_reason"), "stop_sequence": None}, "usage": {"output_tokens": message.get("usage", {}).get("output_tokens", 0)}})
     _sse(handler, "message_stop", {"type": "message_stop"})
