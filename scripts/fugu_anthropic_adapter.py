@@ -126,6 +126,12 @@ def _call_sakana(payload):
     }
     if payload.get("max_tokens"):
         body["max_tokens"] = payload["max_tokens"]
+    max_tokens_cap = os.environ.get("FUGU_MAX_TOKENS")
+    if max_tokens_cap:
+        try:
+            body["max_tokens"] = min(int(body.get("max_tokens", int(max_tokens_cap))), int(max_tokens_cap))
+        except ValueError:
+            pass
     if payload.get("temperature") is not None:
         body["temperature"] = payload["temperature"]
     tools = _tools_to_openai(payload)

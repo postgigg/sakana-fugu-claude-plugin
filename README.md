@@ -118,6 +118,18 @@ Keep these out of commits:
 
 The launcher defaults to Claude Code `--bare` mode. This keeps the startup context smaller and avoids unrelated plugin or MCP overhead. Use `-FullClaude` when you want your normal Claude Code customizations loaded.
 
+For faster responses, use the fast model preset:
+
+```powershell
+$env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -Fast
+```
+
+For Ultra with shorter responses:
+
+```powershell
+$env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -MaxTokens 2048
+```
+
 ```powershell
 $env:USERPROFILE\.claude\skills\sakana-fugu\scripts\claude-fugu.ps1 -FullClaude
 ```

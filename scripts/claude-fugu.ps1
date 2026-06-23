@@ -6,6 +6,10 @@ param(
   [ValidateSet("high", "xhigh", "max")]
   [string]$Effort = "high",
 
+  [int]$MaxTokens = 4096,
+
+  [switch]$Fast,
+
   [int]$Port = 4010,
 
   [switch]$CheckOnly,
@@ -20,6 +24,12 @@ $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($env:SAKANA_API_KEY)) {
   throw "SAKANA_API_KEY is not set. In PowerShell, run: `$env:SAKANA_API_KEY = 'sk-...'"
+}
+
+if ($Fast) {
+  $Model = "fugu"
+  $Effort = "high"
+  $MaxTokens = [Math]::Min($MaxTokens, 2048)
 }
 
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
@@ -67,6 +77,7 @@ $env:ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION = "Sakana $Model via local LiteLL
 $env:ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES = "effort,xhigh_effort,max_effort,thinking,adaptive_thinking,interleaved_thinking"
 $env:CLAUDE_CODE_EFFORT_LEVEL = $Effort
 $env:CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = "1"
+$env:FUGU_MAX_TOKENS = "$MaxTokens"
 
 $launchArgs = @("--model", $Model, "--effort", $Effort)
 if (-not $FullClaude) {
@@ -74,6 +85,6 @@ if (-not $FullClaude) {
 }
 $launchArgs += $ClaudeArgs
 
-Write-Host "Starting Claude Code with $Model through $env:ANTHROPIC_BASE_URL"
+Write-Host "Starting Claude Code with $Model through $env:ANTHROPIC_BASE_URL (max tokens: $MaxTokens)"
 & claude @launchArgs
 exit $LASTEXITCODE
