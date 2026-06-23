@@ -100,10 +100,38 @@ The launcher starts `scripts/fugu_anthropic_adapter.py` on `127.0.0.1:4010`, the
 ```powershell
 ANTHROPIC_BASE_URL=http://127.0.0.1:4010
 ANTHROPIC_AUTH_TOKEN=sk-sakana-local
-ANTHROPIC_MODEL=fugu
+ANTHROPIC_MODEL=fugu-ultra
 ```
 
 The adapter accepts Anthropic Messages requests from Claude Code and forwards them to Sakana's OpenAI-compatible chat completions endpoint.
+
+## How It Works For Vibe Coders
+
+Think of this plugin as a translator plus a safety harness:
+
+```mermaid
+flowchart LR
+  You["You in Claude Code"] --> Claude["Claude Code CLI"]
+  Claude -->|"Anthropic /v1/messages"| Adapter["Local Fugu Adapter<br/>127.0.0.1:4010"]
+  Adapter -->|"OpenAI chat/completions"| Sakana["Sakana Fugu / Fugu Ultra"]
+  Sakana -->|"OpenAI response"| Adapter
+  Adapter -->|"Anthropic response + tool events"| Claude
+  Claude -->|"Runs Bash / reads files / edits"| Repo["Your local repo"]
+```
+
+The important bit:
+
+```text
+You ask for code work
+  -> Claude Code prepares tools like Bash, Read, and Edit
+  -> the local adapter translates that request for Fugu
+  -> Fugu reasons and chooses what to do
+  -> the adapter validates the tool call
+  -> Claude Code executes the tool locally
+  -> results go back through the adapter to Fugu
+```
+
+So Fugu is the reasoning engine, but Claude Code is still the thing touching your files. The adapter sits in the middle to make the two APIs speak the same language.
 
 For tool use, the adapter also acts as a guardrail:
 
