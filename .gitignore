@@ -1,0 +1,22 @@
+.DS_Store
+Thumbs.db
+
+# Local env and secrets
+.env
+.env.*
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Claude local state
+.claude.local.md
+*.log
+
+# OS/editor
+.idea/
+.vscode/

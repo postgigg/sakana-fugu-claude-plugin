@@ -1,0 +1,13 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "sakana-fugu",
+  "version": "0.1.0",
+  "description": "Use Sakana Fugu from Claude Code through an Anthropic-compatible gateway",
+  "author": {
+    "name": "Local",
+    "email": "38542867+postgigg@users.noreply.github.com"
+  },
+  "keywords": ["sakana", "fugu", "gateway", "litellm"],
+  "skills": "./skills/",
+  "commands": "./commands/"
+}
